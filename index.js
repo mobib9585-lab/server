@@ -43,8 +43,10 @@ app.get('/', (req, res) => {
     message: 'Welcome to Portfolio Backend API',
     status: 'Server is running',
     timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV,
     endpoints: {
       health: '/health',
+      debug: '/debug',
       userRegister: '/api/v1/user/register',
       adminRoutes: '/api/v1/admin',
       adminLogin: '/api/v1/admin/login',
@@ -53,7 +55,97 @@ app.get('/', (req, res) => {
   })
 })
 
-// Health check endpoint
+// Debug endpoint to check environment and database
+app.get('/debug', async (req, res) => {
+  try {
+    const Admin = (await import('./adminModel/AdminModel.js')).default
+    
+    const adminCount = await Admin.countDocuments()
+    const admins = await Admin.find({}, { password: 0 }).limit(5)
+    
+    res.json({
+      status: 'Debug info',
+      environment: {
+        NODE_ENV: process.env.NODE_ENV,
+        JWT_SECRET_EXISTS: !!process.env.JWT_SECRET,
+        DB_CONNECTION_EXISTS: !!process.env.DB_Connection,
+        PORT: process.env.PORT
+      },
+      database: {
+        connected: mongoose.connection.readyState === 1,
+        adminCount,
+        sampleAdmins: admins
+      },
+      timestamp: new Date().toISOString()
+    })
+  } catch (error) {
+    res.status(500).json({
+      error: 'Debug endpoint failed',
+      message: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    })
+  }
+})
+
+// Simple admin creation endpoint for emergency use
+app.post('/create-admin', async (req, res) => {
+  try {
+    const Admin = (await import('./adminModel/AdminModel.js')).default
+    const bcrypt = (await import('bcrypt')).default
+    
+    // Check if admin already exists
+    const existingAdmin = await Admin.findOne({ 
+      $or: [{ username: 'admin' }, { email: 'admin@portfolio.com' }] 
+    })
+
+    if (existingAdmin) {
+      return res.json({
+        success: false,
+        message: 'Admin user already exists!',
+        admin: {
+          email: existingAdmin.email,
+          username: existingAdmin.username,
+          createdAt: existingAdmin.createdAt
+        }
+      })
+    }
+
+    // Hash the password
+    const saltRounds = 12
+    const hashedPassword = await bcrypt.hash('password', saltRounds)
+
+    // Create admin user
+    const admin = new Admin({
+      username: 'admin',
+      email: 'admin@portfolio.com',
+      password: hashedPassword,
+      firstName: 'Admin',
+      lastName: 'User',
+      role: 'admin',
+      isActive: true
+    })
+
+    await admin.save()
+
+    res.json({
+      success: true,
+      message: 'Default admin user created successfully!',
+      credentials: {
+        email: 'admin@portfolio.com',
+        username: 'admin',
+        password: 'password'
+      }
+    })
+
+  } catch (error) {
+    console.error('Error creating admin user:', error)
+    res.status(500).json({
+      success: false,
+      message: 'Error creating admin user',
+      error: error.message
+    })
+  }
+})
 app.get('/health', (req, res) => {
   res.status(200).json({
     status: 'OK',
@@ -631,5 +723,4 @@ const DB_connection= mongoose.connect(DB).then(() => {
     app.listen(PORT, () => {
         console.log(`Server is running on port ${PORT}`)
     })
-
 
