@@ -10,15 +10,28 @@ const JWT_SECRET = process.env.JWT_SECRET
 
 // Helper function to generate JWT token
 const generateToken = (adminId, role) => {
-    return jwt.sign(
-        {
-            id: adminId,
-            role: role,
-            type: 'admin'
-        },
-        JWT_SECRET,
-        { expiresIn: '24h' }
-    )
+    console.log('Generating token with:', { adminId, role, jwtSecretExists: !!JWT_SECRET })
+    
+    if (!JWT_SECRET) {
+        throw new Error('JWT_SECRET is not defined in environment variables')
+    }
+    
+    try {
+        const token = jwt.sign(
+            {
+                id: adminId,
+                role: role,
+                type: 'admin'
+            },
+            JWT_SECRET,
+            { expiresIn: '24h' }
+        )
+        console.log('Token generated successfully')
+        return token
+    } catch (error) {
+        console.error('Error generating token:', error)
+        throw error
+    }
 }
 
 // Register admin
@@ -95,42 +108,66 @@ export const registerAdmin = async (req, res) => {
 
 // Login admin
 export const loginAdmin = async (req, res) => {
+    console.log('=== ADMIN LOGIN STARTED ===')
+    console.log('Request body:', req.body)
+    console.log('Environment JWT_SECRET exists:', !!process.env.JWT_SECRET)
+    
     try {
         const { email, password } = req.body
 
         // Validation
         if (!email || !password) {
+            console.log('Validation failed: missing email or password')
             return res.status(400).json({
                 success: false,
                 message: "Email and password are required"
             })
         }
 
+        console.log('Looking for admin with email:', email)
+        
         // Find admin by email
         const admin = await Admin.findOne({ email })
+        console.log('Admin found:', admin ? 'Yes' : 'No')
+        
         if (!admin) {
+            console.log('Admin not found with email:', email)
             return res.status(401).json({
                 success: false,
                 message: "Invalid credentials"
             })
         }
 
+        console.log('Admin details:', {
+            id: admin._id,
+            email: admin.email,
+            isActive: admin.isActive
+        })
+
         // Check if admin is active
         if (!admin.isActive) {
+            console.log('Admin account is deactivated')
             return res.status(401).json({
                 success: false,
                 message: "Account is deactivated. Please contact super admin."
             })
         }
 
+        console.log('Verifying password...')
+        
         // Verify password
         const isPasswordValid = await bcrypt.compare(password, admin.password)
+        console.log('Password valid:', isPasswordValid)
+        
         if (!isPasswordValid) {
+            console.log('Invalid password for admin:', email)
             return res.status(401).json({
                 success: false,
                 message: "Invalid credentials"
             })
         }
+
+        console.log('Updating last login and generating token...')
 
         // Update last login
         admin.lastLogin = new Date()
@@ -138,8 +175,9 @@ export const loginAdmin = async (req, res) => {
 
         // Generate token
         const token = generateToken(admin._id, admin.role)
+        console.log('Token generated successfully')
 
-        res.status(200).json({
+        const response = {
             success: true,
             message: "Login successful",
             data: {
@@ -156,13 +194,26 @@ export const loginAdmin = async (req, res) => {
                 },
                 token
             }
-        })
+        }
+
+        console.log('Sending successful response')
+        res.status(200).json(response)
     } catch (error) {
         console.error('Login admin error:', error)
+        console.error('Error stack:', error.stack)
+        console.error('Error details:', {
+            name: error.name,
+            message: error.message,
+            code: error.code
+        })
+        
         res.status(500).json({
             success: false,
             message: "Internal server error",
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+            error: process.env.NODE_ENV === 'development' ? {
+                message: error.message,
+                stack: error.stack
+            } : undefined
         })
     }
 }
